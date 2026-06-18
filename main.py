@@ -46,7 +46,19 @@ logger = logging.getLogger(__name__)
 
 class TelegramAmazonBot:
     """Bot Telegram per convertire link Amazon in link affiliati."""
-    
+
+    # Comandi mostrati nel menu "/" di Telegram e nel messaggio di aiuto.
+    # (comando, emoji, descrizione) — unica fonte di verità per menu + fallback.
+    MENU_COMMANDS = [
+        ("start", "🚀", "Inizia e configura il bot"),
+        ("settag", "🏷️", "Configura il tuo tag affiliato Amazon"),
+        ("settings", "⚙️", "Gestisci le tue impostazioni"),
+        ("mystats", "📊", "Le tue statistiche personali"),
+        ("export", "📦", "Esporta i tuoi dati (GDPR)"),
+        ("deletedata", "🗑️", "Elimina i tuoi dati (GDPR)"),
+        ("help", "❓", "Guida completa all'uso"),
+    ]
+
     def __init__(self):
         # Configurazione dalle variabili d'ambiente
         self.token = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -524,19 +536,42 @@ Non abbiamo trovato dati associati al tuo account.
 
         await query.answer(results=results, cache_time=5, is_personal=True)
 
+    def _build_commands_text(self) -> str:
+        """Costruisce l'elenco comandi (con spiegazione) dalla lista condivisa."""
+        lines = []
+        for name, emoji, desc in self.MENU_COMMANDS:
+            arg = " <tag>" if name == "settag" else ""
+            lines.append(f"{emoji} `/{name}{arg}` — {desc}")
+        return "\n".join(lines)
+
+    async def unknown_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Risponde ai comandi /sconosciuti spiegando quelli disponibili."""
+        attempted = ""
+        if update.message and update.message.text:
+            attempted = update.message.text.split()[0]
+
+        message = f"""🤔 **Comando non riconosciuto**
+
+Non conosco il comando `{attempted}`. Ecco cosa puoi fare:
+
+{self._build_commands_text()}
+
+💡 Tocca l'icona **"/"** nel tastierino per vedere i comandi con la spiegazione, oppure inviami direttamente un **link Amazon** e lo converto con il tuo tag!"""
+
+        await update.message.reply_text(
+            message,
+            parse_mode='Markdown',
+            disable_web_page_preview=True,
+        )
+
     async def setup_bot_commands(self, application: Application):
         """Configura i comandi visibili nel menu di Telegram."""
         commands = [
-            BotCommand("start", "🚀 Inizia e configura il bot"),
-            BotCommand("settag", "🏷️ Configura il tuo tag affiliato Amazon"),
-            BotCommand("settings", "⚙️ Gestisci le tue impostazioni"),
-            BotCommand("mystats", "📊 Le tue statistiche personali"),
-            BotCommand("export", "📦 Esporta i tuoi dati (GDPR)"),
-            BotCommand("deletedata", "🗑️ Elimina i tuoi dati (GDPR)"),
-            BotCommand("help", "❓ Guida completa all'uso"),
+            BotCommand(name, f"{emoji} {desc}")
+            for name, emoji, desc in self.MENU_COMMANDS
         ]
-        
-        # Imposta i comandi per tutti gli utenti
+
+        # Imposta i comandi per tutti gli utenti (compaiono digitando "/")
         await application.bot.set_my_commands(commands)
         
         # Imposta la descrizione del bot
@@ -868,6 +903,10 @@ Tutto configurato! 👍
 
         # Handler per messaggi con testo (possibili link)
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+
+        # Comandi sconosciuti: aggiunto DOPO i CommandHandler, scatta solo se nessuno
+        # ha gestito il comando -> mostra l'elenco con le spiegazioni
+        application.add_handler(MessageHandler(filters.COMMAND, self.unknown_command))
 
         # Handler per la modalità inline (@nomebot <link> in qualsiasi chat)
         application.add_handler(InlineQueryHandler(self.inline_query))
